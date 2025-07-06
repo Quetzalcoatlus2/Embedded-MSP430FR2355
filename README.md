@@ -1,31 +1,34 @@
 # Embedded-MSP430FR2355
 
-# Joc timpi de reacție
+# Reaction time game
 
-Testarea reflexelor este realizata printr-un joc competitiv jucat in doi. La intervale aleatorii de timp, un led se va aprinde pe placa. Jucatorul care isi apasa butonul mai repede dupa aprinderea
-led-ului castiga runda si primeste un punct. Dupa ce o runda se termina, alta porneste dupa un alt interval aleatoriu de timp. Jocul continua pana cand unul dintre jucatori ajunge la 5 puncte,
-moment in care jucatorul respectiv castiga jocul. Dupa terminarea unui joc poate incepe alt joc cu scorurile resetate daca sunt apasate simultan ambele butoane.
+Reflex testing is done through a competitive two-player game. At random time intervals, an LED will light up on the board. The player who presses their button faster after the LED turns on wins the round and receives a point. After a round ends, another begins after a different random time interval. The game continues until one of the players reaches 5 points, at which point that player wins the game. After a game ends, a new game can start with the scores reset if both buttons are pressed simultaneously.
 
-Se afiseaza in UART:
-- Mesaj de preintampinare al rundei cu numarul rundei ce urmeaza sa inceapa
-- Timpii de reactie ai jucatorilor
-- Cu cat timp a fost jucatorul rapid mai rapid decat jucatorul lent (diferenta dintre timpii de reactie)
-- Scorul fiecarui jucator
-- Mesaj de terminare al jocului cu evidentierea castigatorului si inceperea altui joc
+The following information is displayed over UART:
+
+A message announcing the upcoming round, including the round number
+
+Each player’s reaction times
+
+The time difference showing how much faster the quicker player was than the slower player
+
+The score of each player
+
+A game-over message highlighting the winner and the start of a new game
 
 
-# Generator de semnale
+# Signal generator
 
-Generatorul de semnale permite configurarea semnalelor prin UART.
+The signal generator allows configuration of signal parameters via UART.
 
-Pot fi selectate forme de undă: sinusoidal, triunghi, rampă, dreptunghiular și tren de impulsuri.
+You can select waveform types: sinusoidal, triangular, ramp, square, and pulse train.
 
-Frecvența este stabilă în intervalul 1-344 Hz. 
+The frequency is stable within the range of 1 to 344 Hz.
 
-Amplitudinea este configurată ca procent (100% - 3.3V). 
+The amplitude is configured as a percentage (100% equals 3.3V).
 
-Componenta continuă este configurată în milivolți (1-3300 mV).
+The DC component is configured in millivolts (1–3300 mV).
 
-Faza este configurabilă ca număr de eșantioane (1-300 pentru că sunt folosite 300 de eșantioane pentru generarea unei perioade de semnal).
+The phase is configurable as a number of samples (1–300), since 300 samples are used to generate one signal period.
 
-Sunt configurabile 3 sloturi de formă de undă pentru salvarea formelor de undă.
+There are three waveform slots available for saving waveform configurations.
