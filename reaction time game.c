@@ -1,7 +1,7 @@
 #pragma PERSISTENT(boot_flag)
-unsigned char boot_flag = 0;
+unsigned char boot_flag = 0;  // Persisted flag across soft reset
 
-#include <msp430.h>
+#include <msp430.h> // MSP430FR2355
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -9,9 +9,11 @@ unsigned char boot_flag = 0;
 #include <time.h>
 
 
+// Software DCO frequency trim helper
 void Software_Trim();
 
 
+// Clock and pin definitions
 #define MCLK_FREQ_MHZ 2
 #define SMCLK_FREQ 2000000
 #define LED     BIT0
@@ -19,6 +21,7 @@ void Software_Trim();
 #define BTN2    BIT1
 
 
+// Volatile game timing and state variables
 volatile unsigned long start_time = 0;
 volatile unsigned long press_time1 = 0;
 volatile unsigned long press_time2 = 0;
@@ -29,6 +32,7 @@ volatile unsigned int timer_overflow_count = 0;
 volatile unsigned int round_count = 0;
 
 
+// Initialize clocks and power settings
 void clock_init(void) {
     PM5CTL0 &= ~LOCKLPM5;
     WDTCTL = WDTPW | WDTHOLD;
@@ -46,6 +50,7 @@ void clock_init(void) {
 }
 
 
+// Initialize UART at 38400 baud using SMCLK
 void uart_init(void) {
 
     P4SEL0 |= BIT2 | BIT3;
@@ -63,6 +68,7 @@ void uart_init(void) {
 }
 
 
+// Send a null-terminated string over UART
 void uart_send(char *str) {
     while (*str) {
         while (!(UCA1IFG & UCTXIFG));
@@ -71,6 +77,7 @@ void uart_send(char *str) {
 }
 
 
+// Random delay between rounds (100..999 ms)
 void delay_random(void) {
 
     unsigned int delay = (rand() % 900) + 100;
@@ -80,6 +87,7 @@ void delay_random(void) {
     }
 }
 
+// Reset scores and wait for a button press to start again
 void reset_game(void) {
     scores[0] = 0;
     scores[1] = 0;
@@ -104,6 +112,7 @@ void reset_game(void) {
 
 
 
+// End the current round, print results, and update score
 void end_round(void) {
     P1OUT &= ~LED;
     game_active = 0;
@@ -155,6 +164,7 @@ void end_round(void) {
 }
 
 
+// Start a new round after random delay
 void start_round(void) {
     char buffer[80];
     round_count++;
@@ -172,11 +182,13 @@ void start_round(void) {
 }
 
 
+// Configure TB0 in continuous mode and enable overflow interrupt
 void setup_timer(void) {
     TB0CTL = TBSSEL__SMCLK | MC__CONTINUOUS | TBCLR | TBIE;
 }
 
 
+// Configure LED and button GPIOs with interrupts
 void setup_gpio(void) {
     P1DIR |= LED;
     P1OUT &= ~LED;
@@ -198,6 +210,7 @@ void setup_gpio(void) {
     P4IE  |= BTN2;
 }
 
+// Main application loop
 int main(void) {
     WDTCTL = WDTPW | WDTHOLD;
     __delay_cycles(10000);
@@ -242,6 +255,7 @@ int main(void) {
 
 
 
+// BTN1 interrupt: capture player 1 reaction time
 #pragma vector=PORT2_VECTOR
 __interrupt void Port2_ISR(void) {
 
@@ -267,6 +281,7 @@ __interrupt void Port2_ISR(void) {
 }
 
 
+// BTN2 interrupt: capture player 2 reaction time
 #pragma vector=PORT4_VECTOR
 __interrupt void Port4_ISR(void) {
 
@@ -293,6 +308,7 @@ __interrupt void Port4_ISR(void) {
 
 
 
+// Timer overflow interrupt extends reaction-time range
 #pragma vector=TIMER0_B1_VECTOR
 __interrupt void Timer_B_ISR(void) {
     if (TB0IV == TB0IV_TBIFG) {
@@ -301,6 +317,7 @@ __interrupt void Timer_B_ISR(void) {
 }
 
 
+// Fine-trim DCO for stable configured MCLK frequency
 void Software_Trim(void) {
     unsigned int oldDcoTap = 0xffff;
     unsigned int newDcoTap = 0xffff;
