@@ -1,28 +1,19 @@
 
-
-
-
-
-
-
-
-
-
+// Description:
+// UART-controlled waveform generator for MSP430FR2355.
+// - DAC output is generated from 300-sample waveform lookup tables.
+// - ADC data can be sampled and printed over UART.
+// - MCLK/SMCLK are configured to 24 MHz in main().
 
 #include <msp430.h>
 
 #include <stdlib.h>
 
 #include <string.h>
-
-
-
-
+// Optional GPIO init prototype kept from earlier revisions.
 void Init_GPIO();
 
-
-
-
+// Sine-wave lookup table (300 samples, 12-bit range 0..4095).
 unsigned int sine_wave[300] = {
                            2048, 2090, 2133, 2176, 2219, 2262, 2304, 2347, 2389, 2431, 2473, 2515, 2557, 2598, 2639, 2680, 2721, 2761, 2801, 2841,
                            2880, 2919, 2958, 2996, 3034, 3071, 3108, 3145, 3181, 3216, 3251, 3285, 3319, 3353, 3385, 3418, 3449, 3480, 3510, 3540,
@@ -39,9 +30,7 @@ unsigned int sine_wave[300] = {
                            100, 114, 128, 144, 160, 177, 195, 214, 233, 253, 274, 296, 319, 342, 366, 391, 417, 443, 470, 498,
                            526, 555, 585, 615, 646, 677, 710, 742, 776, 810, 844, 879, 914, 950, 987, 1024, 1061, 1099, 1137, 1176,
                            1215, 1254, 1294, 1334, 1374, 1415, 1456, 1497, 1538, 1580, 1622, 1664, 1706, 1748, 1791, 1833, 1876, 1919, 1962, 2005};
-
-
-
+// Ramp-wave lookup table (300 samples, linear sawtooth).
 unsigned int ramp_wave[300] = { 0, 14, 27, 41, 55, 68, 82, 96, 110, 123, 137, 151, 164, 178, 192, 205,
                               219, 233, 246, 260, 274, 287, 301, 315, 329, 342, 356, 370, 383, 397, 411, 424,
                               438, 452, 465, 479, 493, 507, 520, 534, 548, 561, 575, 589, 602, 616, 630, 643,
@@ -62,9 +51,7 @@ unsigned int ramp_wave[300] = { 0, 14, 27, 41, 55, 68, 82, 96, 110, 123, 137, 15
                               3724, 3737, 3751, 3765, 3778, 3792, 3806, 3820, 3833, 3847, 3861, 3874, 3888, 3902, 3915, 3929,
                               3943, 3956, 3970, 3984, 3997, 4011, 4025, 4039, 4052, 4066, 4080, 4093
                           };
-
-
-
+// Triangle-wave lookup table (300 samples).
 unsigned int triangle_wave[300] = {0, 27, 55, 82, 110, 137, 164, 192, 219, 246, 274, 301, 329, 356, 383, 411,
     438, 465, 493, 520, 548, 575, 602, 630, 657, 685, 712, 739, 767, 794, 821, 849,
     876, 904, 931, 958, 986, 1013, 1040, 1068, 1095, 1123, 1150, 1177, 1205, 1232, 1259, 1287,
@@ -85,88 +72,67 @@ unsigned int triangle_wave[300] = {0, 27, 55, 82, 110, 137, 164, 192, 219, 246, 
     767, 739, 712, 684, 657, 630, 602, 575, 548, 520, 493, 465, 438, 411, 383, 356,
     329, 301, 274, 246, 219, 192, 164, 137, 110, 82, 55, 27
 };
-
-
-
+// Runtime-generated square waveform.
 unsigned int square_wave[300];
 
-
+// Runtime-generated pulse-train waveform.
 unsigned int pulse_train_wave[300];
-
-
-
+// Slot-based waveform routing:
+// - assignment slot (X/Y/Z) receives waveform type commands
+// - output slot (L/M/N) is sent to DAC
 unsigned int *waveform_slots[3];
 unsigned int current_assignment_slot_index = 0;
 unsigned int current_output_slot_index = 0;
-
-
-
-
-
+// UART format buffer for ADC output lines (one line per ADC channel).
 char ADC_char[3][12] = {
     {'A','x','=',' ','x','x','x','x',10,13,0},
     {'A','x','=',' ','x','x','x','x',10,13,0},
     {'A','x','=',' ','x','x','x','x',10,13,0}
 };
-
+// Generic loop counters.
 unsigned int i,j;
-
-
+// Current sample index in one waveform period.
 unsigned int current_waveform_index = 0;
-
-
+// Forward declarations.
+// Software DCO trim helper to improve clock stability.
 void Software_Trim();
 void uart_send_string(const char *str);
 void uart_send_uint(unsigned int val);
-
-
-
+// Reference MCLK value used in clock-trim delay calculations.
 #define MCLK_FREQ_MHZ 24
-
-
+// ADC conversion results (three channels).
 unsigned int ADC_Result[3];
-
+// Rolling ADC result index used by ADC ISR.
 unsigned char ADC_i;
-
-
-
+// Legacy DAC variable (final DAC write is done in Timer2_B0_ISR).
 unsigned int DAC_data=0;
-
-
+// Frequency input parser state.
 #define FREQ_INPUT_BUFFER_SIZE 6
 char freq_input_buffer[FREQ_INPUT_BUFFER_SIZE];
 unsigned char freq_input_buffer_idx = 0;
-
-
+// Amplitude input parser state.
 #define AMPLITUDE_INPUT_BUFFER_SIZE 4
 char amplitude_input_buffer[AMPLITUDE_INPUT_BUFFER_SIZE];
 unsigned char amplitude_input_buffer_idx = 0;
 unsigned int current_amplitude_percentage = 100;
-
-
-
+// Precomputed amplitude scaling used in ISR:
+// scaling = (amplitude_percent * 256) / 100
 volatile unsigned int current_amplitude_scaling_factor;
-
-
+// Offset input parser state.
 #define OFFSET_INPUT_BUFFER_SIZE 5
 char offset_input_buffer[OFFSET_INPUT_BUFFER_SIZE];
 unsigned char offset_input_buffer_idx = 0;
 unsigned int current_offset_mv = 1650;
-
-
-
+// Precomputed DC offset in DAC units:
+// offset_dac = (offset_mv * 4095) / 3300
 volatile long precalculated_offset_dac_units;
-
-
+// Phase input parser state.
 #define PHASE_INPUT_BUFFER_SIZE 4
 char phase_input_buffer[PHASE_INPUT_BUFFER_SIZE];
 unsigned char phase_input_buffer_idx = 0;
 unsigned int current_phase_offset_samples = 0;
-
-
-
-
-
+// UART receive state machine:
+// command mode or one of numeric-input modes (F/A/O/H).
 typedef enum {
     NORMAL_COMMAND_MODE,
     FREQUENCY_INPUT_MODE,
@@ -174,22 +140,17 @@ typedef enum {
     OFFSET_INPUT_MODE,
     PHASE_INPUT_MODE
 } UART_RX_State;
-
-
+// Current UART receive state.
 UART_RX_State uart_rx_state = NORMAL_COMMAND_MODE;
-
-
-
-
-
-
-
+// Timer increment controlling waveform sample rate:
+// frequency ≈ SMCLK / (timer_b0_ccr0_increment * 300).
 volatile unsigned int timer_b0_ccr0_increment = 666;
 
 
 
 int main(void)
 {
+    // Stop watchdog timer during initialization.
 
 
 
@@ -198,6 +159,7 @@ int main(void)
 
 
 
+    // Build square waveform: 50% duty cycle.
     for(i=0; i<300; i++)
     {
         if(i < 150) square_wave[i] = 4095;
@@ -207,6 +169,7 @@ int main(void)
 
 
 
+    // Build pulse-train waveform: narrow pulse.
     for(i=0; i<300; i++)
     {
         if(i < 3) pulse_train_wave[i] = 4095;
@@ -215,11 +178,13 @@ int main(void)
 
 
 
+    // Initialize waveform slots with sine by default.
     waveform_slots[0] = sine_wave;
     waveform_slots[1] = sine_wave;
     waveform_slots[2] = sine_wave;
 
 
+    // Initialize default signal parameters.
     current_amplitude_percentage = 100;
 
     current_amplitude_scaling_factor = ((long)current_amplitude_percentage * 256) / 100;
@@ -231,6 +196,7 @@ int main(void)
 
 
 
+    // Configure flash wait states and clock system for 24 MHz operation.
     FRCTL0 = FRCTLPW | NWAITS_2;
 
 
@@ -241,17 +207,20 @@ int main(void)
 
 
 
+    // DCO range selection + fine trim enabled.
     CSCTL1 = DCOFTRIMEN_1 | DCOFTRIM0 | DCOFTRIM1 | DCORSEL_6;
 
 
 
 
+    // FLL multiplier for ~24 MHz target.
     CSCTL2 = FLLD_0 + 731;
 
     __delay_cycles(3);
 
     __bic_SR_register(SCG0);
 
+    // Final software trim for stable DCO.
     Software_Trim();
 
 
@@ -265,6 +234,7 @@ int main(void)
 
 
 
+    // GPIO function mux configuration.
     P1SEL0 |= BIT5;
     P1SEL1 |= BIT5;
 
@@ -275,44 +245,52 @@ int main(void)
 
 
 
+    // UART configuration for command interface.
     UCA1CTLW0 |= UCSWRST;
 
     UCA1CTLW0 |= UCSSEL_2;
 
 
 
+    // Baud-rate divider for 115200 with 24 MHz SMCLK.
     UCA1BR0 = 13;
     UCA1BR1 = 0x00;
 
 
 
 
+    // Fractional modulation settings.
     UCA1MCTLW = (0x44 << 8) | (0 << 4) | UCOS16;
 
 
 
+    // SAC output pins.
     P3DIR |= BIT0; P3SEL0 |= BIT0; P3SEL1 &= ~BIT0;
 
     P3DIR |= BIT4; P3SEL0 |= BIT4; P3SEL1 &= ~BIT4;
 
 
 
+    // ADC analog input pins (A0/A1/A2).
     P1SEL0 |=  BIT0 + BIT1 + BIT2;
     P1SEL1 |=  BIT0 + BIT1 + BIT2;
 
 
 
+    // Unlock GPIOs from high-impedance mode.
     PM5CTL0 &= ~LOCKLPM5;
 
 
 
 
+    // Enable internal voltage reference.
     PMMCTL0_H = PMMPW_H;
     PMMCTL2 |= INTREFEN;
 
     __delay_cycles(400);
 
 
+    // Enable UART and print startup help.
     UCA1CTLW0 &= ~UCSWRST;
 
 
@@ -332,11 +310,13 @@ int main(void)
 
 
 
+    // Enable UART RX interrupt.
     UCA1IE |= UCRXIE;
 
 
 
 
+    // ADC basic configuration.
     ADCCTL0 |= ADCSHT_10 | ADCON;
 
 
@@ -344,6 +324,7 @@ int main(void)
     ADCCTL1 |= ADCSHP | ADCSHS_2 | ADCCONSEQ_3;
 
 
+    // Set ADC resolution to 12 bits.
     ADCCTL2 &= ~ADCRES;
     ADCCTL2 |= ADCRES_2;
 
@@ -357,6 +338,7 @@ int main(void)
 
 
 
+    // SAC1 setup for DAC output path.
     SAC1DAC = DACSREF_0 + DACLSEL_0 + DACIE;
 
     SAC1DAT = DAC_data;
@@ -394,11 +376,13 @@ int main(void)
 
 
 
+    // Timer_B2 drives DAC sample update cadence.
     TB2CTL |= TBSSEL__SMCLK | ID_0 | TBCLR | MC__CONTINOUS| TBIE;
 
 
 
 
+    // Timer_B1 provides ADC trigger cadence.
     TB1CCR0 = 326;
 
 
@@ -418,6 +402,7 @@ int main(void)
     i=0;
 
 
+    // Enable ADC conversions and global interrupts.
     ADCCTL0 |= ADCENC;
 
     TB1CTL |= TBCLR;
@@ -428,10 +413,12 @@ int main(void)
 
 
 
+    // Runtime behavior is interrupt-driven after init.
     __no_operation();
 }
 
 
+// Send a null-terminated UART string.
 void uart_send_string(const char *str)
 {
 
@@ -450,6 +437,7 @@ void uart_send_string(const char *str)
 
 
 
+// Send an unsigned integer over UART as decimal text.
 void uart_send_uint(unsigned int val) {
     char buffer[6];
     int k = 0;
@@ -476,6 +464,7 @@ void uart_send_uint(unsigned int val) {
 
 
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+// ADC interrupt service routine.
 #pragma vector=ADC_VECTOR
 __interrupt void ADC_ISR(void)
 #elif defined(__GNUC__)
@@ -527,6 +516,7 @@ void __attribute__ ((interrupt(ADC_VECTOR))) ADC_ISR (void)
 
 
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+// UART interrupt service routine (command parser + echo).
 #pragma vector=USCI_A1_VECTOR
 __interrupt void USCI_A1_ISR(void)
 #elif defined(__GNUC__)
@@ -538,10 +528,12 @@ void __attribute__ ((interrupt(USCI_A1_VECTOR))) USCI_A1_ISR(void)
   char received_char;
 
 
+  // Dispatch UART interrupt source.
   switch(__even_in_range(UCA1IV,USCI_UART_UCTXCPTIFG))
   {
     case USCI_NONE: break;
     case USCI_UART_UCRXIFG:
+        // Read RX byte and echo it back to the terminal.
         received_char = UCA1RXBUF;
 
 
@@ -549,6 +541,7 @@ void __attribute__ ((interrupt(USCI_A1_VECTOR))) USCI_A1_ISR(void)
         UCA1TXBUF = received_char;
 
 
+        // Parse input according to active UART state-machine mode.
         if (uart_rx_state == FREQUENCY_INPUT_MODE)
         {
             if (received_char == '\r' || received_char == '\n')
@@ -560,16 +553,19 @@ void __attribute__ ((interrupt(USCI_A1_VECTOR))) USCI_A1_ISR(void)
                     unsigned long requested_freq_hz = atoi(freq_input_buffer);
 
 
+                    // Validate requested frequency range.
                     if (requested_freq_hz >= 1 && requested_freq_hz <= 10000)
                     {
                         unsigned long calc_increment;
 
 
 
+                        // Compute timer increment from requested frequency and samples/period.
                         calc_increment = 24000000UL / requested_freq_hz;
                         calc_increment /= 300UL;
 
 
+                        // Clamp timer increment to practical hardware limits.
                         const unsigned int MIN_CCR_INCREMENT = 7;
                         const unsigned int MAX_CCR_INCREMENT = 65535;
 
@@ -583,6 +579,7 @@ void __attribute__ ((interrupt(USCI_A1_VECTOR))) USCI_A1_ISR(void)
 
 
 
+                        // Report effective output frequency achieved by the quantized increment.
                         unsigned long term_calc = (24000000UL / 300UL) * 1000UL;
                         unsigned long actual_freq_milihz = term_calc / (unsigned long)timer_b0_ccr0_increment;
 
@@ -606,11 +603,13 @@ void __attribute__ ((interrupt(USCI_A1_VECTOR))) USCI_A1_ISR(void)
                 memset(freq_input_buffer, 0, FREQ_INPUT_BUFFER_SIZE);
             }
 
+            // Accept numeric input while there is room in the buffer.
             else if (received_char >= '0' && received_char <= '9' && freq_input_buffer_idx < (FREQ_INPUT_BUFFER_SIZE - 1))
             {
                 freq_input_buffer[freq_input_buffer_idx++] = received_char;
             }
 
+            // Handle backspace for interactive terminal editing.
             else if ((received_char == '\b' || received_char == 127) && freq_input_buffer_idx > 0)
             {
                 freq_input_buffer_idx--;
@@ -797,6 +796,7 @@ void __attribute__ ((interrupt(USCI_A1_VECTOR))) USCI_A1_ISR(void)
                 uart_send_string("\r\n> ");
             }
 
+            // Waveform assignment commands for the selected assignment slot.
             else if(received_char == 's') {
                 waveform_slots[current_assignment_slot_index] = sine_wave;
                 uart_send_string("\r\nSine assigned to Slot "); uart_send_uint(current_assignment_slot_index); uart_send_string(".\r\n> ");
@@ -818,6 +818,7 @@ void __attribute__ ((interrupt(USCI_A1_VECTOR))) USCI_A1_ISR(void)
                 uart_send_string("\r\nPulse train assigned to Slot "); uart_send_uint(current_assignment_slot_index); uart_send_string(".\r\n> ");
             }
 
+            // Assignment-slot selection commands.
             else if(received_char == 'X' || received_char == 'x') {
                 current_assignment_slot_index = 0;
                 uart_send_string("\r\nSlot 0 for assignment.\r\n> ");
@@ -831,6 +832,7 @@ void __attribute__ ((interrupt(USCI_A1_VECTOR))) USCI_A1_ISR(void)
                 uart_send_string("\r\nSlot 2 for assignment.\r\n> ");
             }
 
+            // Output-slot selection commands.
             else if(received_char == 'L' || received_char == 'l') {
                 current_output_slot_index = 0;
                 uart_send_string("\r\nSlot 0 for DAC output.\r\n> ");
@@ -864,6 +866,7 @@ void __attribute__ ((interrupt(USCI_A1_VECTOR))) USCI_A1_ISR(void)
 
 
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+// Timer B2 CCR0 ISR: waveform sample generation and DAC update.
 #pragma vector = TIMER2_B0_VECTOR
 __interrupt void Timer2_B0_ISR(void)
 #elif defined(__GNUC__)
@@ -874,14 +877,17 @@ void __attribute__ ((interrupt(TIMER2_B0_VECTOR))) Timer2_B0_ISR (void)
 {
 
 
+    // Schedule the next update event by incrementing CCR0.
     TB2CCR0 += timer_b0_ccr0_increment;
 
 
+    // Advance waveform sample index with wrap-around at 300 samples.
     current_waveform_index++;
     if(current_waveform_index >= 300)
         current_waveform_index = 0;
 
 
+    // Apply phase offset in sample domain.
     unsigned int temp_phased_index = current_waveform_index + current_phase_offset_samples;
     if (temp_phased_index >= 300) {
         temp_phased_index -= 300;
@@ -890,6 +896,7 @@ void __attribute__ ((interrupt(TIMER2_B0_VECTOR))) Timer2_B0_ISR (void)
 
 
 
+    // Fetch raw waveform sample from selected output slot.
     unsigned int raw_sample = waveform_slots[current_output_slot_index][phased_waveform_index];
 
 
@@ -898,6 +905,7 @@ void __attribute__ ((interrupt(TIMER2_B0_VECTOR))) Timer2_B0_ISR (void)
 
 
 
+    // Center sample around midpoint, scale by amplitude, then add DC offset.
     long sample_relative_to_raw_mid = (long)raw_sample - dac_raw_midpoint;
 
 
@@ -915,17 +923,20 @@ void __attribute__ ((interrupt(TIMER2_B0_VECTOR))) Timer2_B0_ISR (void)
     long final_value_long = offset_dac_units + scaled_relative_sample;
 
 
+    // Clamp to valid 12-bit DAC range.
     if (final_value_long < 0) final_value_long = 0;
     if (final_value_long > 4095) final_value_long = 4095;
 
 
 
+    // Write final sample to DAC data register.
     SAC1DAT = (unsigned int)final_value_long;
 }
 
 
 
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+// Timer B2 CCR1/overflow ISR.
 #pragma vector = TIMER2_B1_VECTOR
 __interrupt void Timer2_B1_ISR(void)
 #elif defined(__GNUC__)
@@ -950,10 +961,7 @@ void __attribute__ ((interrupt(TIMER2_B1_VECTOR))) Timer2_B1_ISR (void)
             break;
     }
 }
-
-
-
-
+// Software DCO trim helper to improve clock stability.
 void Software_Trim()
 {
 
@@ -968,9 +976,11 @@ void Software_Trim()
     unsigned int dcoFreqTrim = 3;
     unsigned char endLoop = 0;
 
+    // Iteratively adjust trim until DCO tap converges around midpoint.
     do
     {
 
+        // Reset DCO tap to midscale before each measurement cycle.
         CSCTL0 = 0x100;
         do
         {
@@ -981,6 +991,7 @@ void Software_Trim()
 
 
 
+        // Wait long enough for FLL/DCO to settle.
         __delay_cycles((unsigned int)3000 * MCLK_FREQ_MHZ);
 
 
@@ -997,6 +1008,7 @@ void Software_Trim()
 
 
 
+        // Adjust DCOFTRIM direction based on whether tap is below/above center.
         if(newDcoTap < 256)
         {
             newDcoDelta = 256 - newDcoTap;
@@ -1033,6 +1045,7 @@ void Software_Trim()
     }while(endLoop == 0);
 
 
+    // Restore best register values found during sweep.
     CSCTL0 = csCtl0Copy;
     CSCTL1 = csCtl1Copy;
 
