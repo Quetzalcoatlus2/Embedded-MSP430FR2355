@@ -56,7 +56,11 @@ A UART-controlled waveform generator with selectable waveform slots and runtime 
 
 ### UART commands
 
-- `s`, `t`, `r`, `p`, `c` → assign Sine/Triangle/Ramp/Square/Pulse to current assignment slot
+- `s` → assign Sine to current assignment slot
+- `t` → assign Triangle to current assignment slot
+- `r` → assign Ramp to current assignment slot
+- `p` → assign Square to current assignment slot
+- `c` → assign Pulse train to current assignment slot
 - `X`, `Y`, `Z` → select assignment slot 0/1/2
 - `L`, `M`, `N` → select DAC output slot 0/1/2
 - `F` → set frequency
