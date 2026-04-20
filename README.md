@@ -1,34 +1,71 @@
 # Embedded-MSP430FR2355
 
-# Reaction time game
+This repository contains two embedded applications for the **MSP430FR2355** microcontroller:
 
-Reflex testing is done through a competitive two-player game. At random time intervals, an LED will light up on the board. The player who presses their button faster after the LED turns on wins the round and receives a point. After a round ends, another begins after a different random time interval. The game continues until one of the players reaches 5 points, at which point that player wins the game. After a game ends, a new game can start with the scores reset if both buttons are pressed simultaneously.
+- a two-player **reaction time game**
+- a UART-controlled **signal generator**
 
-The following information is displayed over UART:
+## Repository contents
 
-A message announcing the upcoming round, including the round number
+- `reaction time game.c` – two-player reflex game with UART status output
+- `signal generator.c` – waveform generator with UART command interface
 
-Each player’s reaction times
+## 1) Reaction Time Game
 
-The time difference showing how much faster the quicker player was than the slower player
+A competitive two-player reflex game:
 
-The score of each player
+1. A round is announced over UART.
+2. After a random delay, the board LED turns on.
+3. Each player presses their button as quickly as possible.
+4. The faster player gets a point.
+5. First player to reach **5 points** wins.
 
-A game-over message highlighting the winner and the start of a new game
+After the game ends, the score is reset and a new game starts when the players press the buttons again.
 
+### UART output includes
 
-# Signal generator
+- round announcements
+- player reaction times (ms)
+- reaction-time difference between players
+- current score
+- game winner message
 
-The signal generator allows configuration of signal parameters via UART.
+## 2) Signal Generator
 
-You can select waveform types: sinusoidal, triangular, ramp, square, and pulse train.
+A UART-controlled waveform generator with selectable waveform slots and runtime parameter configuration.
 
-The frequency is stable within the range of 1 to 344 Hz.
+### Supported waveforms
 
-The amplitude is configured as a percentage (100% equals 3.3V).
+- sine
+- triangle
+- ramp
+- square
+- pulse train
 
-The DC component is configured in millivolts (1–3300 mV).
+### Configurable parameters
 
-The phase is configurable as a number of samples (1–300), since 300 samples are used to generate one signal period.
+- frequency
+- amplitude (%)
+- DC offset (mV)
+- phase (sample offset)
 
-There are three waveform slots available for saving waveform configurations.
+### Slot model
+
+- **assignment slot**: choose which waveform is stored in slot 0/1/2
+- **DAC output slot**: choose which slot is sent to DAC output
+
+### UART commands
+
+- `s`, `t`, `r`, `p`, `c` → assign Sine/Triangle/Ramp/Square/Pulse to current assignment slot
+- `X`, `Y`, `Z` → select assignment slot 0/1/2
+- `L`, `M`, `N` → select DAC output slot 0/1/2
+- `F` → set frequency
+- `A` → set amplitude
+- `O` → set offset
+- `H` → set phase
+- `#` → print ADC data
+
+## Notes
+
+- UART text and documentation are in English.
+- Frequency accuracy/range depends on timer settings and MCU clock configuration in `signal generator.c`.
