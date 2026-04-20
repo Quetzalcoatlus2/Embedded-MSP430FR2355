@@ -9,6 +9,8 @@
 
 
 
+// Multi-waveform signal generator with UART control
+// Uses DAC output and ADC sampling on MSP430FR2355
 #include <msp430.h>
 
 #include <stdlib.h>
@@ -18,11 +20,13 @@
 
 
 
+// Legacy prototype retained from earlier revisions
 void Init_GPIO();
 
 
 
 
+// Sine wave lookup table (300 samples, 12-bit DAC range)
 unsigned int sine_wave[300] = {
                            2048, 2090, 2133, 2176, 2219, 2262, 2304, 2347, 2389, 2431, 2473, 2515, 2557, 2598, 2639, 2680, 2721, 2761, 2801, 2841,
                            2880, 2919, 2958, 2996, 3034, 3071, 3108, 3145, 3181, 3216, 3251, 3285, 3319, 3353, 3385, 3418, 3449, 3480, 3510, 3540,
@@ -42,6 +46,7 @@ unsigned int sine_wave[300] = {
 
 
 
+// Ramp (sawtooth) lookup table
 unsigned int ramp_wave[300] = { 0, 14, 27, 41, 55, 68, 82, 96, 110, 123, 137, 151, 164, 178, 192, 205,
                               219, 233, 246, 260, 274, 287, 301, 315, 329, 342, 356, 370, 383, 397, 411, 424,
                               438, 452, 465, 479, 493, 507, 520, 534, 548, 561, 575, 589, 602, 616, 630, 643,
@@ -65,6 +70,7 @@ unsigned int ramp_wave[300] = { 0, 14, 27, 41, 55, 68, 82, 96, 110, 123, 137, 15
 
 
 
+// Triangle lookup table
 unsigned int triangle_wave[300] = {0, 27, 55, 82, 110, 137, 164, 192, 219, 246, 274, 301, 329, 356, 383, 411,
     438, 465, 493, 520, 548, 575, 602, 630, 657, 685, 712, 739, 767, 794, 821, 849,
     876, 904, 931, 958, 986, 1013, 1040, 1068, 1095, 1123, 1150, 1177, 1205, 1232, 1259, 1287,
@@ -88,13 +94,16 @@ unsigned int triangle_wave[300] = {0, 27, 55, 82, 110, 137, 164, 192, 219, 246, 
 
 
 
+// Runtime-generated square wave lookup table
 unsigned int square_wave[300];
 
 
+// Runtime-generated pulse-train lookup table
 unsigned int pulse_train_wave[300];
 
 
 
+// Three assignment slots selectable for DAC output
 unsigned int *waveform_slots[3];
 unsigned int current_assignment_slot_index = 0;
 unsigned int current_output_slot_index = 0;
@@ -103,6 +112,7 @@ unsigned int current_output_slot_index = 0;
 
 
 
+// UART formatting buffer for three ADC channel readings
 char ADC_char[3][12] = {
     {'A','x','=',' ','x','x','x','x',10,13,0},
     {'A','x','=',' ','x','x','x','x',10,13,0},
@@ -112,32 +122,40 @@ char ADC_char[3][12] = {
 unsigned int i,j;
 
 
+// Current index in the selected waveform table
 unsigned int current_waveform_index = 0;
 
 
+// Fine-trim DCO for stable high-frequency operation
 void Software_Trim();
+// Send a null-terminated string over UART
 void uart_send_string(const char *str);
 void uart_send_uint(unsigned int val);
 
 
 
+// Clock frequency used by the DCO trim routine
 #define MCLK_FREQ_MHZ 24
 
 
+// Latest ADC conversion results for 3 channels
 unsigned int ADC_Result[3];
 
 unsigned char ADC_i;
 
 
 
+// DAC data placeholder (final value computed in timer ISR)
 unsigned int DAC_data=0;
 
 
+// UART input buffer for frequency command values
 #define FREQ_INPUT_BUFFER_SIZE 6
 char freq_input_buffer[FREQ_INPUT_BUFFER_SIZE];
 unsigned char freq_input_buffer_idx = 0;
 
 
+// UART input buffer for amplitude command values
 #define AMPLITUDE_INPUT_BUFFER_SIZE 4
 char amplitude_input_buffer[AMPLITUDE_INPUT_BUFFER_SIZE];
 unsigned char amplitude_input_buffer_idx = 0;
@@ -148,6 +166,7 @@ unsigned int current_amplitude_percentage = 100;
 volatile unsigned int current_amplitude_scaling_factor;
 
 
+// UART input buffer for DC offset command values
 #define OFFSET_INPUT_BUFFER_SIZE 5
 char offset_input_buffer[OFFSET_INPUT_BUFFER_SIZE];
 unsigned char offset_input_buffer_idx = 0;
@@ -158,6 +177,7 @@ unsigned int current_offset_mv = 1650;
 volatile long precalculated_offset_dac_units;
 
 
+// UART input buffer for phase command values
 #define PHASE_INPUT_BUFFER_SIZE 4
 char phase_input_buffer[PHASE_INPUT_BUFFER_SIZE];
 unsigned char phase_input_buffer_idx = 0;
@@ -167,6 +187,7 @@ unsigned int current_phase_offset_samples = 0;
 
 
 
+// UART receive state machine modes
 typedef enum {
     NORMAL_COMMAND_MODE,
     FREQUENCY_INPUT_MODE,
@@ -184,10 +205,12 @@ UART_RX_State uart_rx_state = NORMAL_COMMAND_MODE;
 
 
 
+// TB2 CCR0 increment controlling output frequency
 volatile unsigned int timer_b0_ccr0_increment = 666;
 
 
 
+// Main initialization and runtime setup
 int main(void)
 {
 
@@ -450,6 +473,7 @@ void uart_send_string(const char *str)
 
 
 
+// Send an unsigned integer as ASCII over UART
 void uart_send_uint(unsigned int val) {
     char buffer[6];
     int k = 0;
@@ -476,6 +500,7 @@ void uart_send_uint(unsigned int val) {
 
 
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+// ADC ISR: collect conversion results into ADC_Result[]
 #pragma vector=ADC_VECTOR
 __interrupt void ADC_ISR(void)
 #elif defined(__GNUC__)
@@ -527,6 +552,7 @@ void __attribute__ ((interrupt(ADC_VECTOR))) ADC_ISR (void)
 
 
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+// UART RX ISR: command parser and parameter input handling
 #pragma vector=USCI_A1_VECTOR
 __interrupt void USCI_A1_ISR(void)
 #elif defined(__GNUC__)
@@ -864,6 +890,7 @@ void __attribute__ ((interrupt(USCI_A1_VECTOR))) USCI_A1_ISR(void)
 
 
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+// DAC update ISR: outputs the next waveform sample
 #pragma vector = TIMER2_B0_VECTOR
 __interrupt void Timer2_B0_ISR(void)
 #elif defined(__GNUC__)
@@ -926,6 +953,7 @@ void __attribute__ ((interrupt(TIMER2_B0_VECTOR))) Timer2_B0_ISR (void)
 
 
 #if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
+// Timer B2 secondary ISR (CCR1 / overflow bookkeeping)
 #pragma vector = TIMER2_B1_VECTOR
 __interrupt void Timer2_B1_ISR(void)
 #elif defined(__GNUC__)
